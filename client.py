@@ -4,10 +4,37 @@ import json
 import threading
 import sys
 import math
+import os
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 # Configuration
-SERVER_HOST = '127.0.0.1'
+SERVER_HOST = '192.168.1.31' # Default to your current local IP
 SERVER_PORT = 5556
+
+# Resolve config file path relative to the executable/script
+base_dir = os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(__file__))
+config_path = os.path.join(base_dir, "server_info.txt")
+
+if os.path.exists(config_path):
+    try:
+        with open(config_path, "r") as f:
+            data = f.read().strip()
+            if ":" in data:
+                SERVER_HOST, port_str = data.split(":")
+                SERVER_PORT = int(port_str)
+            else:
+                SERVER_HOST = data
+    except:
+        pass
+
 WIDTH, HEIGHT = 800, 600
 FPS = 60
 
@@ -105,23 +132,27 @@ def main():
     global my_username, authenticated
     
     if not connect_to_server():
-        print("Cannot connect to server")
+        screen.fill(BLACK)
+        err_msg = font.render(f"Cannot connect to server at {SERVER_HOST}", True, RED)
+        screen.blit(err_msg, (WIDTH//2 - 200, HEIGHT//2))
+        pygame.display.flip()
+        pygame.time.delay(3000)
         return
 
     # Load Assets
     try:
-        player_img = pygame.image.load('assets/player.png').convert()
+        player_img = pygame.image.load(resource_path('assets/player.png')).convert()
         player_img.set_colorkey(MAGENTA)
         player_img = pygame.transform.scale(player_img, (50, 50))
 
-        zombie_img = pygame.image.load('assets/zombie.png').convert()
+        zombie_img = pygame.image.load(resource_path('assets/zombie.png')).convert()
         zombie_img.set_colorkey(MAGENTA)
         zombie_img = pygame.transform.scale(zombie_img, (50, 50))
 
-        bg_img = pygame.image.load('assets/bg.png').convert()
+        bg_img = pygame.image.load(resource_path('assets/bg.png')).convert()
         bg_img = pygame.transform.scale(bg_img, (800, 600))
     except Exception as e:
-        print("Missing assets, using colored blocks fallback")
+        print(f"Error loading assets: {e}")
         player_img = pygame.Surface((40, 40)); player_img.fill(BLUE)
         zombie_img = pygame.Surface((40, 40)); zombie_img.fill(RED)
         bg_img = pygame.Surface((800, 600)); bg_img.fill((50, 50, 50))
@@ -161,7 +192,6 @@ def main():
             
             elif state == "PLAYING":
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                    # Shoot
                     send_msg({"action": "shoot", "x": my_x, "y": my_y, "angle": my_angle})
 
         if state == "LOGIN":
@@ -173,7 +203,6 @@ def main():
                 for box in input_boxes: box.draw(screen)
 
         elif state == "PLAYING":
-            # Input & Rotation
             mx, my = pygame.mouse.get_pos()
             my_angle = math.degrees(math.atan2(my_y - my, mx - my_x))
 
@@ -184,43 +213,30 @@ def main():
             if keys[pygame.K_UP] or keys[pygame.K_w]: my_y -= speed; moved = True
             if keys[pygame.K_DOWN] or keys[pygame.K_s]: my_y += speed; moved = True
 
-            # Keep inside bounds
             my_x = max(0, min(800, my_x))
             my_y = max(0, min(600, my_y))
 
-            if moved or True: # Always send update to sync angle
-                send_msg({"action": "move", "x": my_x, "y": my_y, "angle": my_angle})
+            send_msg({"action": "move", "x": my_x, "y": my_y, "angle": my_angle})
 
-            # Rendering
             screen.blit(bg_img, (0, 0))
             
-            # Bullets
             for b in bullets:
                 pygame.draw.circle(screen, YELLOW, (int(b['x']), int(b['y'])), 4)
             
-            # Zombies
             for z in zombies:
                 zx, zy = z['x'], z['y']
-                # Rotate zombie towards player roughly (or just don't rotate for simplicity)
                 screen.blit(zombie_img, zombie_img.get_rect(center=(zx, zy)))
-                # Draw HP bar for zombie
                 pygame.draw.rect(screen, RED, (zx - 20, zy - 30, 40, 5))
                 pygame.draw.rect(screen, GREEN, (zx - 20, zy - 30, 40 * (z['hp'] / 50), 5))
 
-            # Players
             for user, p in game_state.items():
                 px, py, angle = p.get('x', 0), p.get('y', 0), p.get('angle', 0)
-                
-                # Rotate player
                 rotated_img = pygame.transform.rotate(player_img, angle)
                 new_rect = rotated_img.get_rect(center=(px, py))
                 screen.blit(rotated_img, new_rect.topleft)
-                
-                # Nametag
                 name_lbl = font.render(user, True, WHITE)
                 screen.blit(name_lbl, (px - 20, py - 40))
 
-            # HUD (My HP & Score)
             my_info = game_state.get(my_username, {})
             my_hp = my_info.get('hp', 100)
             my_score = my_info.get('score', 0)

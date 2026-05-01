@@ -6,9 +6,18 @@ import sys
 import random
 import time
 import math
+import os
+
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 SERVER_HOST = '127.0.0.1'
 SERVER_PORT = 5556
+
 WIDTH, HEIGHT = 800, 600
 FPS = 60
 
@@ -17,6 +26,7 @@ WHITE = (255, 255, 255)
 YELLOW = (255, 255, 0)
 GREEN = (0, 255, 0)
 RED = (255, 0, 0)
+BLACK = (0, 0, 0)
 
 pygame.init()
 pygame.font.init()
@@ -50,13 +60,13 @@ def run_bot(bot_num):
     clock = pygame.time.Clock()
 
     try:
-        player_img = pygame.image.load('assets/player.png').convert()
+        player_img = pygame.image.load(resource_path('assets/player.png')).convert()
         player_img.set_colorkey(MAGENTA)
         player_img = pygame.transform.scale(player_img, (50, 50))
-        zombie_img = pygame.image.load('assets/zombie.png').convert()
+        zombie_img = pygame.image.load(resource_path('assets/zombie.png')).convert()
         zombie_img.set_colorkey(MAGENTA)
         zombie_img = pygame.transform.scale(zombie_img, (50, 50))
-        bg_img = pygame.image.load('assets/bg.png').convert()
+        bg_img = pygame.image.load(resource_path('assets/bg.png')).convert()
         bg_img = pygame.transform.scale(bg_img, (800, 600))
     except:
         player_img = pygame.Surface((40, 40)); player_img.fill(GREEN)
@@ -91,7 +101,6 @@ def run_bot(bot_num):
             if event.type == pygame.QUIT: running = False
 
         if state_dict['authenticated']:
-            # Bot AI Logic
             if abs(my_x - target_x) < speed and abs(my_y - target_y) < speed:
                 target_x = random.randint(50, 750)
                 target_y = random.randint(50, 550)
@@ -102,25 +111,20 @@ def run_bot(bot_num):
             if my_y < target_y: my_y += speed; moved = True
             elif my_y > target_y: my_y -= speed; moved = True
 
-            # Auto aim at nearest zombie
             my_angle = 0
             if state_dict['zombies']:
                 nearest_z = min(state_dict['zombies'], key=lambda z: math.hypot(my_x - z['x'], my_y - z['y']))
                 my_angle = math.degrees(math.atan2(my_y - nearest_z['y'], nearest_z['x'] - my_x))
-                if random.random() < 0.1: # Shoot sometimes
+                if random.random() < 0.1:
                     send_msg({"action": "shoot", "x": my_x, "y": my_y, "angle": my_angle})
 
             send_msg({"action": "move", "x": my_x, "y": my_y, "angle": my_angle})
 
-            # Rendering
             screen.blit(bg_img, (0, 0))
-            
             for b in state_dict['bullets']:
                 pygame.draw.circle(screen, YELLOW, (int(b['x']), int(b['y'])), 4)
-            
             for z in state_dict['zombies']:
                 screen.blit(zombie_img, zombie_img.get_rect(center=(z['x'], z['y'])))
-
             for user, p in state_dict['game_state'].items():
                 rotated_img = pygame.transform.rotate(player_img, p.get('angle', 0))
                 screen.blit(rotated_img, rotated_img.get_rect(center=(p.get('x',0), p.get('y',0))).topleft)
