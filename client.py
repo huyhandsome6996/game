@@ -8,12 +8,17 @@ import os
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
+    if getattr(sys, 'frozen', False):
+        # PyInstaller 6.x directory mode puts everything in _internal
+        exe_dir = os.path.dirname(sys.executable)
+        # Try _internal first (standard for PyInstaller 6+)
+        internal_path = os.path.join(exe_dir, '_internal', relative_path)
+        if os.path.exists(internal_path):
+            return internal_path
+        # Fallback for --onefile or older versions
+        return os.path.join(getattr(sys, '_MEIPASS', exe_dir), relative_path)
+    else:
+        return os.path.join(os.path.abspath("."), relative_path)
 
 # Configuration
 SERVER_HOST = '192.168.1.31' # Default to your current local IP
@@ -45,6 +50,7 @@ MAGENTA = (255, 0, 255)
 YELLOW = (255, 255, 0)
 GREEN = (0, 255, 0)
 RED = (255, 0, 0)
+BLUE = (0, 0, 255)
 
 pygame.init()
 pygame.font.init()
