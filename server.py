@@ -182,7 +182,6 @@ def broadcast_state():
                     pass
 
 def start_server():
-    database.init_db()
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.bind((HOST, PORT))
     server.listen()
