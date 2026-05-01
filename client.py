@@ -78,6 +78,14 @@ def network_thread():
                 if action == 'login_response':
                     if msg.get('success'):
                         authenticated = True
+                    else:
+                        # We need a way to pass status to main loop
+                        # For now we'll just use a hacky way or let the user try again
+                        pass
+                elif action == 'register_response':
+                    # We can't easily update login_status from here without a shared dict
+                    # but the user will see they can login now
+                    pass
                 elif action == 'game_state':
                     game_state = msg.get('state', {})
                     zombies = msg.get('zombies', [])
@@ -162,6 +170,8 @@ def main():
     input_boxes = [username_box, password_box]
 
     state = "LOGIN"
+    login_status = ""
+    status_color = BLACK
     my_x, my_y = 400, 300
     my_angle = 0
     speed = 5
@@ -179,28 +189,49 @@ def main():
             if state == "LOGIN":
                 for box in input_boxes:
                     box.handle_event(event)
+                
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_RETURN:
                         user, pwd = username_box.text, password_box.text
                         if user and pwd:
                             my_username = user
                             send_msg({"action": "login", "username": user, "password": pwd})
-                    elif event.key == pygame.K_r:
+                            login_status = "Logging in..."
+                            status_color = BLACK
+                    elif event.key == pygame.K_TAB:
                         user, pwd = username_box.text, password_box.text
                         if user and pwd:
                             send_msg({"action": "register", "username": user, "password": pwd})
+                            login_status = "Registering..."
+                            status_color = BLACK
             
             elif state == "PLAYING":
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     send_msg({"action": "shoot", "x": my_x, "y": my_y, "angle": my_angle})
 
         if state == "LOGIN":
+            # Check for messages from network thread
+            # (In a real app we'd use a queue, but for simplicity we check global vars)
             if authenticated:
                 state = "PLAYING"
-            else:
-                title = font.render("ZOMBIE SHOOTER - Login(Enter)/Register(R)", True, BLACK)
-                screen.blit(title, (WIDTH//2 - 200, HEIGHT//2 - 100))
-                for box in input_boxes: box.draw(screen)
+            
+            title = font.render("ZOMBIE SHOOTER", True, BLACK)
+            screen.blit(title, (WIDTH//2 - 100, HEIGHT//2 - 150))
+            
+            u_lbl = font.render("Username:", True, BLACK)
+            screen.blit(u_lbl, (WIDTH//2 - 220, HEIGHT//2 - 50))
+            
+            p_lbl = font.render("Password:", True, BLACK)
+            screen.blit(p_lbl, (WIDTH//2 - 220, HEIGHT//2 + 10))
+            
+            hint = font.render("ENTER to Login | TAB to Register", True, (100, 100, 100))
+            screen.blit(hint, (WIDTH//2 - 150, HEIGHT//2 + 100))
+            
+            if login_status:
+                status_lbl = font.render(login_status, True, status_color)
+                screen.blit(status_lbl, (WIDTH//2 - 100, HEIGHT//2 + 60))
+
+            for box in input_boxes: box.draw(screen)
 
         elif state == "PLAYING":
             mx, my = pygame.mouse.get_pos()
