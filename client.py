@@ -7,7 +7,7 @@ import math
 
 # Configuration
 SERVER_HOST = '127.0.0.1'
-SERVER_PORT = 5555
+SERVER_PORT = 5556
 WIDTH, HEIGHT = 800, 600
 FPS = 60
 

@@ -8,7 +8,7 @@ import time
 import math
 
 SERVER_HOST = '127.0.0.1'
-SERVER_PORT = 5555
+SERVER_PORT = 5556
 WIDTH, HEIGHT = 800, 600
 FPS = 60
 
@@ -124,6 +124,10 @@ def run_bot(bot_num):
             for user, p in state_dict['game_state'].items():
                 rotated_img = pygame.transform.rotate(player_img, p.get('angle', 0))
                 screen.blit(rotated_img, rotated_img.get_rect(center=(p.get('x',0), p.get('y',0))).topleft)
+        else:
+            screen.fill(WHITE)
+            txt = font.render(f"Bot {bot_num} is connecting to server...", True, BLACK)
+            screen.blit(txt, (WIDTH//2 - 150, HEIGHT//2))
 
         pygame.display.flip()
         clock.tick(FPS)

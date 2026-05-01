@@ -8,7 +8,7 @@ import math
 
 # Configuration
 HOST = '127.0.0.1'
-PORT = 5555
+PORT = 5556
 
 # Server State
 clients = {} # {addr: {"conn": conn, "username": username, "x": 100, "y": 100, "hp": 100, "score": 0, "angle": 0}}
