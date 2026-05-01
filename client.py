@@ -3,6 +3,7 @@ import socket
 import json
 import threading
 import sys
+import math
 
 # Configuration
 SERVER_HOST = '127.0.0.1'
@@ -13,15 +14,15 @@ FPS = 60
 # Colors
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
-GRAY = (200, 200, 200)
-BLUE = (0, 0, 255)
+MAGENTA = (255, 0, 255)
+YELLOW = (255, 255, 0)
+GREEN = (0, 255, 0)
 RED = (255, 0, 0)
 
-# Initialize Pygame
 pygame.init()
 pygame.font.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Co-op Game - Login")
+pygame.display.set_caption("Co-op Zombie Shooter")
 font = pygame.font.SysFont('Arial', 24)
 clock = pygame.time.Clock()
 
@@ -31,16 +32,16 @@ connected = False
 authenticated = False
 my_username = ""
 game_state = {}
+zombies = []
+bullets = []
 
 def network_thread():
-    global authenticated, game_state
+    global authenticated, game_state, zombies, bullets
     while True:
         try:
-            data = client_socket.recv(4096)
-            if not data:
-                break
+            data = client_socket.recv(8192)
+            if not data: break
             
-            # Split by json objects in case multiple arrived at once
             messages = data.decode('utf-8').replace('}{', '}\n{').split('\n')
             for msg_str in messages:
                 if not msg_str: continue
@@ -50,20 +51,12 @@ def network_thread():
                 if action == 'login_response':
                     if msg.get('success'):
                         authenticated = True
-                        print("[LOGIN SUCCESS]")
-                    else:
-                        print("[LOGIN FAILED]")
-                elif action == 'register_response':
-                    if msg.get('success'):
-                        print("[REGISTER SUCCESS] Now you can login.")
-                    else:
-                        print("[REGISTER FAILED] Username may exist.")
                 elif action == 'game_state':
                     game_state = msg.get('state', {})
+                    zombies = msg.get('zombies', [])
+                    bullets = msg.get('bullets', [])
         except Exception as e:
-            print(f"[NETWORK ERROR] {e}")
             break
-    print("[DISCONNECTED FROM SERVER]")
 
 def connect_to_server():
     global connected
@@ -74,16 +67,15 @@ def connect_to_server():
         thread.start()
         return True
     except Exception as e:
-        print(f"[CONNECTION FAILED] {e}")
         return False
 
 def send_msg(msg_dict):
     try:
         client_socket.sendall(json.dumps(msg_dict).encode('utf-8'))
     except Exception as e:
-        print(f"[SEND ERROR] {e}")
+        pass
 
-# --- UI Elements for Login ---
+# UI Login Box
 class InputBox:
     def __init__(self, x, y, w, h, text=''):
         self.rect = pygame.Rect(x, y, w, h)
@@ -96,20 +88,13 @@ class InputBox:
 
     def handle_event(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN:
-            if self.rect.collidepoint(event.pos):
-                self.active = not self.active
-            else:
-                self.active = False
+            self.active = self.rect.collidepoint(event.pos)
             self.color = self.color_active if self.active else self.color_inactive
-        if event.type == pygame.KEYDOWN:
-            if self.active:
-                if event.key == pygame.K_RETURN:
-                    return True
-                elif event.key == pygame.K_BACKSPACE:
-                    self.text = self.text[:-1]
-                else:
-                    self.text += event.unicode
-                self.txt_surface = font.render(self.text, True, self.color)
+        if event.type == pygame.KEYDOWN and self.active:
+            if event.key == pygame.K_RETURN: return True
+            elif event.key == pygame.K_BACKSPACE: self.text = self.text[:-1]
+            else: self.text += event.unicode
+            self.txt_surface = font.render(self.text, True, self.color)
         return False
 
     def draw(self, screen):
@@ -120,17 +105,34 @@ def main():
     global my_username, authenticated
     
     if not connect_to_server():
+        print("Cannot connect to server")
         return
 
-    # Login UI
+    # Load Assets
+    try:
+        player_img = pygame.image.load('assets/player.png').convert()
+        player_img.set_colorkey(MAGENTA)
+        player_img = pygame.transform.scale(player_img, (50, 50))
+
+        zombie_img = pygame.image.load('assets/zombie.png').convert()
+        zombie_img.set_colorkey(MAGENTA)
+        zombie_img = pygame.transform.scale(zombie_img, (50, 50))
+
+        bg_img = pygame.image.load('assets/bg.png').convert()
+        bg_img = pygame.transform.scale(bg_img, (800, 600))
+    except Exception as e:
+        print("Missing assets, using colored blocks fallback")
+        player_img = pygame.Surface((40, 40)); player_img.fill(BLUE)
+        zombie_img = pygame.Surface((40, 40)); zombie_img.fill(RED)
+        bg_img = pygame.Surface((800, 600)); bg_img.fill((50, 50, 50))
+
     username_box = InputBox(WIDTH//2 - 100, HEIGHT//2 - 50, 200, 32)
     password_box = InputBox(WIDTH//2 - 100, HEIGHT//2 + 10, 200, 32)
     input_boxes = [username_box, password_box]
 
-    state = "LOGIN" # LOGIN, PLAYING
-    
-    # Player logical state (client-side prediction)
-    my_x, my_y = 100, 100
+    state = "LOGIN"
+    my_x, my_y = 400, 300
+    my_angle = 0
     speed = 5
 
     running = True
@@ -146,79 +148,84 @@ def main():
             if state == "LOGIN":
                 for box in input_boxes:
                     box.handle_event(event)
-                
-                # Button Logic (Simple key press for now)
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_RETURN:
-                        # Press Enter to Login
-                        user = username_box.text
-                        pwd = password_box.text
+                        user, pwd = username_box.text, password_box.text
                         if user and pwd:
                             my_username = user
                             send_msg({"action": "login", "username": user, "password": pwd})
                     elif event.key == pygame.K_r:
-                        # Press R to Register
-                        user = username_box.text
-                        pwd = password_box.text
+                        user, pwd = username_box.text, password_box.text
                         if user and pwd:
                             send_msg({"action": "register", "username": user, "password": pwd})
+            
+            elif state == "PLAYING":
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    # Shoot
+                    send_msg({"action": "shoot", "x": my_x, "y": my_y, "angle": my_angle})
 
         if state == "LOGIN":
             if authenticated:
                 state = "PLAYING"
-                pygame.display.set_caption(f"Co-op Game - Playing as {my_username}")
             else:
-                # Draw Login Screen
-                title = font.render("Login (Enter) / Register (R)", True, BLACK)
-                u_label = font.render("User:", True, BLACK)
-                p_label = font.render("Pass:", True, BLACK)
-                
-                screen.blit(title, (WIDTH//2 - 120, HEIGHT//2 - 100))
-                screen.blit(u_label, (WIDTH//2 - 170, HEIGHT//2 - 45))
-                screen.blit(p_label, (WIDTH//2 - 170, HEIGHT//2 + 15))
-                
-                for box in input_boxes:
-                    box.draw(screen)
+                title = font.render("ZOMBIE SHOOTER - Login(Enter)/Register(R)", True, BLACK)
+                screen.blit(title, (WIDTH//2 - 200, HEIGHT//2 - 100))
+                for box in input_boxes: box.draw(screen)
 
         elif state == "PLAYING":
-            # Handle Movement
+            # Input & Rotation
+            mx, my = pygame.mouse.get_pos()
+            my_angle = math.degrees(math.atan2(my_y - my, mx - my_x))
+
             keys = pygame.key.get_pressed()
             moved = False
-            if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-                my_x -= speed
-                moved = True
-            if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-                my_x += speed
-                moved = True
-            if keys[pygame.K_UP] or keys[pygame.K_w]:
-                my_y -= speed
-                moved = True
-            if keys[pygame.K_DOWN] or keys[pygame.K_s]:
-                my_y += speed
-                moved = True
+            if keys[pygame.K_LEFT] or keys[pygame.K_a]: my_x -= speed; moved = True
+            if keys[pygame.K_RIGHT] or keys[pygame.K_d]: my_x += speed; moved = True
+            if keys[pygame.K_UP] or keys[pygame.K_w]: my_y -= speed; moved = True
+            if keys[pygame.K_DOWN] or keys[pygame.K_s]: my_y += speed; moved = True
 
-            # Send position if moved
-            if moved:
-                send_msg({"action": "move", "x": my_x, "y": my_y})
+            # Keep inside bounds
+            my_x = max(0, min(800, my_x))
+            my_y = max(0, min(600, my_y))
 
-            # Render Game State
-            # Draw ground / simple environment
-            pygame.draw.rect(screen, GRAY, (0, HEIGHT - 50, WIDTH, 50))
+            if moved or True: # Always send update to sync angle
+                send_msg({"action": "move", "x": my_x, "y": my_y, "angle": my_angle})
+
+            # Rendering
+            screen.blit(bg_img, (0, 0))
             
-            # Draw other players
-            for user, pos in game_state.items():
-                px, py = pos.get('x', 0), pos.get('y', 0)
-                color = BLUE if user == my_username else RED
-                
-                # Draw player square
-                pygame.draw.rect(screen, color, (px, py, 40, 40))
-                
-                # Draw nametag
-                name_lbl = font.render(user, True, BLACK)
-                screen.blit(name_lbl, (px, py - 25))
+            # Bullets
+            for b in bullets:
+                pygame.draw.circle(screen, YELLOW, (int(b['x']), int(b['y'])), 4)
+            
+            # Zombies
+            for z in zombies:
+                zx, zy = z['x'], z['y']
+                # Rotate zombie towards player roughly (or just don't rotate for simplicity)
+                screen.blit(zombie_img, zombie_img.get_rect(center=(zx, zy)))
+                # Draw HP bar for zombie
+                pygame.draw.rect(screen, RED, (zx - 20, zy - 30, 40, 5))
+                pygame.draw.rect(screen, GREEN, (zx - 20, zy - 30, 40 * (z['hp'] / 50), 5))
 
-            # Sync local visual position with server state to avoid jitter, 
-            # or just draw using game_state. Here we trust local my_x/my_y for smoothness.
+            # Players
+            for user, p in game_state.items():
+                px, py, angle = p.get('x', 0), p.get('y', 0), p.get('angle', 0)
+                
+                # Rotate player
+                rotated_img = pygame.transform.rotate(player_img, angle)
+                new_rect = rotated_img.get_rect(center=(px, py))
+                screen.blit(rotated_img, new_rect.topleft)
+                
+                # Nametag
+                name_lbl = font.render(user, True, WHITE)
+                screen.blit(name_lbl, (px - 20, py - 40))
+
+            # HUD (My HP & Score)
+            my_info = game_state.get(my_username, {})
+            my_hp = my_info.get('hp', 100)
+            my_score = my_info.get('score', 0)
+            hud = font.render(f"HP: {my_hp} | SCORE: {my_score}", True, WHITE)
+            screen.blit(hud, (10, 10))
 
         pygame.display.flip()
         clock.tick(FPS)

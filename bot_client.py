@@ -5,32 +5,28 @@ import threading
 import sys
 import random
 import time
+import math
 
-# Configuration
 SERVER_HOST = '127.0.0.1'
 SERVER_PORT = 5555
-WIDTH, HEIGHT = 600, 450
+WIDTH, HEIGHT = 800, 600
 FPS = 60
 
-# Colors
+MAGENTA = (255, 0, 255)
 WHITE = (255, 255, 255)
-BLACK = (0, 0, 0)
-GRAY = (200, 200, 200)
-BLUE = (0, 0, 255)
-RED = (255, 0, 0)
+YELLOW = (255, 255, 0)
 GREEN = (0, 255, 0)
+RED = (255, 0, 0)
 
 pygame.init()
 pygame.font.init()
-
 font = pygame.font.SysFont('Arial', 24)
 
 def network_thread(client_socket, state_dict):
     while True:
         try:
-            data = client_socket.recv(4096)
-            if not data:
-                break
+            data = client_socket.recv(8192)
+            if not data: break
             
             messages = data.decode('utf-8').replace('}{', '}\n{').split('\n')
             for msg_str in messages:
@@ -43,6 +39,8 @@ def network_thread(client_socket, state_dict):
                         state_dict['authenticated'] = True
                 elif action == 'game_state':
                     state_dict['game_state'] = msg.get('state', {})
+                    state_dict['zombies'] = msg.get('zombies', [])
+                    state_dict['bullets'] = msg.get('bullets', [])
         except Exception as e:
             break
 
@@ -51,74 +49,81 @@ def run_bot(bot_num):
     pygame.display.set_caption(f"Auto Bot {bot_num}")
     clock = pygame.time.Clock()
 
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        client_socket.connect((SERVER_HOST, SERVER_PORT))
+        player_img = pygame.image.load('assets/player.png').convert()
+        player_img.set_colorkey(MAGENTA)
+        player_img = pygame.transform.scale(player_img, (50, 50))
+        zombie_img = pygame.image.load('assets/zombie.png').convert()
+        zombie_img.set_colorkey(MAGENTA)
+        zombie_img = pygame.transform.scale(zombie_img, (50, 50))
+        bg_img = pygame.image.load('assets/bg.png').convert()
+        bg_img = pygame.transform.scale(bg_img, (800, 600))
     except:
-        print(f"Bot {bot_num} failed to connect")
-        return
+        player_img = pygame.Surface((40, 40)); player_img.fill(GREEN)
+        zombie_img = pygame.Surface((40, 40)); zombie_img.fill(RED)
+        bg_img = pygame.Surface((800, 600)); bg_img.fill((50, 50, 50))
 
-    state_dict = {'authenticated': False, 'game_state': {}}
-    thread = threading.Thread(target=network_thread, args=(client_socket, state_dict), daemon=True)
-    thread.start()
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try: client_socket.connect((SERVER_HOST, SERVER_PORT))
+    except: return
+
+    state_dict = {'authenticated': False, 'game_state': {}, 'zombies': [], 'bullets': []}
+    threading.Thread(target=network_thread, args=(client_socket, state_dict), daemon=True).start()
 
     def send_msg(msg_dict):
-        try:
-            client_socket.sendall(json.dumps(msg_dict).encode('utf-8'))
-        except:
-            pass
+        try: client_socket.sendall(json.dumps(msg_dict).encode('utf-8'))
+        except: pass
 
     username = f"AutoBot_{bot_num}"
-    password = "bot_password"
+    password = "bot_pwd"
 
-    # Register and Login
     send_msg({"action": "register", "username": username, "password": password})
     time.sleep(0.5)
     send_msg({"action": "login", "username": username, "password": password})
 
-    my_x, my_y = random.randint(50, WIDTH-50), random.randint(50, HEIGHT-100)
-    speed = 4
-
-    # AI Random Movement State
+    my_x, my_y = random.randint(50, 750), random.randint(50, 550)
     target_x, target_y = my_x, my_y
+    speed = 4
 
     running = True
     while running:
-        screen.fill(WHITE)
-
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
+            if event.type == pygame.QUIT: running = False
 
         if state_dict['authenticated']:
             # Bot AI Logic
             if abs(my_x - target_x) < speed and abs(my_y - target_y) < speed:
-                target_x = random.randint(50, WIDTH-50)
-                target_y = random.randint(50, HEIGHT-100)
+                target_x = random.randint(50, 750)
+                target_y = random.randint(50, 550)
             
             moved = False
             if my_x < target_x: my_x += speed; moved = True
             elif my_x > target_x: my_x -= speed; moved = True
-            
             if my_y < target_y: my_y += speed; moved = True
             elif my_y > target_y: my_y -= speed; moved = True
 
-            if moved:
-                send_msg({"action": "move", "x": my_x, "y": my_y})
+            # Auto aim at nearest zombie
+            my_angle = 0
+            if state_dict['zombies']:
+                nearest_z = min(state_dict['zombies'], key=lambda z: math.hypot(my_x - z['x'], my_y - z['y']))
+                my_angle = math.degrees(math.atan2(my_y - nearest_z['y'], nearest_z['x'] - my_x))
+                if random.random() < 0.1: # Shoot sometimes
+                    send_msg({"action": "shoot", "x": my_x, "y": my_y, "angle": my_angle})
+
+            send_msg({"action": "move", "x": my_x, "y": my_y, "angle": my_angle})
 
             # Rendering
-            pygame.draw.rect(screen, GRAY, (0, HEIGHT - 50, WIDTH, 50))
+            screen.blit(bg_img, (0, 0))
             
-            for user, pos in state_dict['game_state'].items():
-                px, py = pos.get('x', 0), pos.get('y', 0)
-                color = GREEN if user == username else RED
-                
-                pygame.draw.rect(screen, color, (px, py, 40, 40))
-                name_lbl = font.render(user, True, BLACK)
-                screen.blit(name_lbl, (px, py - 25))
-        else:
-            txt = font.render(f"Bot {bot_num} is Logging in...", True, BLACK)
-            screen.blit(txt, (WIDTH//2 - 100, HEIGHT//2))
+            for b in state_dict['bullets']:
+                pygame.draw.circle(screen, YELLOW, (int(b['x']), int(b['y'])), 4)
+            
+            for z in state_dict['zombies']:
+                screen.blit(zombie_img, zombie_img.get_rect(center=(z['x'], z['y'])))
+
+            for user, p in state_dict['game_state'].items():
+                rotated_img = pygame.transform.rotate(player_img, p.get('angle', 0))
+                screen.blit(rotated_img, rotated_img.get_rect(center=(p.get('x',0), p.get('y',0))).topleft)
 
         pygame.display.flip()
         clock.tick(FPS)
